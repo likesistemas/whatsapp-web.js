@@ -445,9 +445,6 @@ class Client extends EventEmitter {
      * @property {string} [quotedMessageId] - Id of the message that is being quoted (or replied to)
      * @property {Contact[]} [mentions] - Contacts that are being mentioned in the message
      * @property {boolean} [sendSeen=true] - Mark the conversation as seen after sending the message
-     * @property {string} [stickerAuthor=undefined] - Sets the author of the sticker, (if sendMediaAsSticker is true).
-     * @property {string} [stickerName=undefined] - Sets the name of the sticker, (if sendMediaAsSticker is true).
-     * @property {string[]} [stickerCategories=undefined] - Sets the categories of the sticker, (if sendMediaAsSticker is true). Provide emoji char array, can be null.
      * @property {MessageMedia} [media] - Media to be sent
      */
 
@@ -494,12 +491,7 @@ class Client extends EventEmitter {
         }
 
         if (internalOptions.sendMediaAsSticker && internalOptions.attachment) {
-            internalOptions.attachment = 
-                await Util.formatToWebpSticker(internalOptions.attachment, {
-                    name: options.stickerName,
-                    author: options.stickerAuthor,
-                    categories: options.stickerCategories
-                });
+            internalOptions.attachment = await Util.formatToWebpSticker(internalOptions.attachment);
         }
 
         const newMessage = await this.pupPage.evaluate(async (chatId, message, options, sendSeen) => {
