@@ -1,6 +1,5 @@
 'use strict';
 
-const sharp = require('sharp');
 const path = require('path');
 const Crypto = require('crypto');
 const { tmpdir } = require('os');
@@ -36,39 +35,6 @@ class Util {
         }
 
         return given;
-    }
-
-    /**
-     * Formats a image to webp
-     * @param {MessageMedia} media
-     * 
-     * @returns {Promise<MessageMedia>} media in webp format
-     */
-    static async formatImageToWebpSticker(media) {
-        if (!media.mimetype.includes('image'))
-            throw new Error('media is not a image');
-      
-        if (media.mimetype.includes('webp')) {
-            return media;
-        }
-      
-        const buff = Buffer.from(media.data, 'base64');
-      
-        let sharpImg = sharp(buff);
-        sharpImg = sharpImg.webp();
-      
-        sharpImg = sharpImg.resize(512, 512, {
-            fit: 'contain',
-            background: { r: 0, g: 0, b: 0, alpha: 0 },
-        });
-      
-        let webpBase64 = (await sharpImg.toBuffer()).toString('base64');
-      
-        return {             
-            mimetype: 'image/webp',
-            data: webpBase64,
-            filename: media.filename,
-        };
     }
       
     /**
@@ -142,9 +108,7 @@ class Util {
      * @returns {Promise<MessageMedia>} media in webp format
      */
     static async formatToWebpSticker(media) {
-        if (media.mimetype.includes('image')) return this.formatImageToWebpSticker(media);
-        else if (media.mimetype.includes('video')) return this.formatVideoToWebpSticker(media);
-        else throw new Error('Invalid media format');
+        throw new Error('Invalid media format');
     }
 
     /**
