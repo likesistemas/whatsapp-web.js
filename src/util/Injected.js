@@ -36,6 +36,16 @@ exports.ExposeStore = (moduleRaidStr) => {
     window.Store.QueryOrder = window.mR.findModule('queryOrder')[0];
     window.Store.QueryProduct = window.mR.findModule('queryProduct')[0];
     window.Store.DownloadManager = window.mR.findModule('DownloadManager')[0].default;
+    window.Store.Call = window.mR.findModule('CallCollection')[0].default;
+
+    if(!window.Store.Chat._find) {
+        window.Store.Chat._find = e => {
+            const target = window.Store.Chat.get(e);
+            return target ? Promise.resolve(target) : Promise.resolve({
+                id: e
+            });
+        };
+    }
 };
 
 exports.LoadUtils = () => {
@@ -143,7 +153,47 @@ exports.LoadUtils = () => {
                 options = { ...options, ...preview };
             }
         }
+        
+        let extraOptions = {};
+        if(options.buttons){
+            let caption;
+            if(options.buttons.type === 'chat') {
+                content = options.buttons.body;
+                caption = content;
+            }else{
+                caption = options.caption ? options.caption : ' '; //Caption can't be empty
+            }
+            extraOptions = {
+                productHeaderImageRejected: false,
+                isFromTemplate: false,
+                isDynamicReplyButtonsMsg: true,
+                title: options.buttons.title ? options.buttons.title : undefined,
+                footer: options.buttons.footer ? options.buttons.footer : undefined,
+                dynamicReplyButtons: options.buttons.buttons,
+                replyButtons: options.buttons.buttons,
+                caption: caption
+            };
+            delete options.buttons;
+        }
 
+        if(options.list){
+            if(window.Store.Conn.platform === 'smba' || window.Store.Conn.platform === 'smbi'){
+                throw '[LT01] Whatsapp business can\'t send this yet';
+            }
+            extraOptions = {
+                ...extraOptions,
+                type: 'list',
+                footer: options.list.footer,
+                list: {
+                    ...options.list,
+                    listType: 1
+                },
+                body: options.list.description
+            };
+            delete options.list;
+            delete extraOptions.list.footer;
+        }
+                
         const newMsgId = new window.Store.MsgKey({
             fromMe: true,
             remote: chat.id,
@@ -165,7 +215,8 @@ exports.LoadUtils = () => {
             ...locationOptions,
             ...attOptions,
             ...quotedMsgOptions,
-            ...vcardOptions
+            ...vcardOptions,
+            ...extraOptions
         };
 
         await window.Store.SendMessage.addAndSendMsgToChat(chat, message);
@@ -264,16 +315,26 @@ exports.LoadUtils = () => {
         const msg = message.serialize();
         
         msg.isStatusV3 = message.isStatusV3;
-        msg.links = (message.getLinks()).map(link => link.href);
+        msg.links = (message.getLinks()).map(link => ({ 
+            link: link.href, 
+            isSuspicious: Boolean(link.suspiciousCharacters && link.suspiciousCharacters.size)
+        }));
 
         if (msg.buttons) {
             msg.buttons = msg.buttons.serialize();
+        }
+        if (msg.dynamicReplyButtons) {
+            msg.dynamicReplyButtons = JSON.parse(JSON.stringify(msg.dynamicReplyButtons));
+        }
+        if(msg.replyButtons) {
+            msg.replyButtons = JSON.parse(JSON.stringify(msg.replyButtons));
         }
         
         delete msg.pendingAckUpdate;
         
         return msg;
     };
+
 
     window.WWebJS.getChatModel = async chat => {
         let res = chat.serialize();
@@ -294,7 +355,8 @@ exports.LoadUtils = () => {
     };
 
     window.WWebJS.getChat = async chatId => {
-        const chat = window.Store.Chat.get(chatId);
+        const chatWid = window.Store.WidFactory.createWid(chatId);
+        const chat = await window.Store.Chat.find(chatWid);
         return await window.WWebJS.getChatModel(chat);
     };
 
@@ -324,8 +386,9 @@ exports.LoadUtils = () => {
         return res;
     };
 
-    window.WWebJS.getContact = contactId => {
-        const contact = window.Store.Contact.get(contactId);
+    window.WWebJS.getContact = async contactId => {
+        const wid = window.Store.WidFactory.createWid(contactId);
+        const contact = await window.Store.Contact.find(wid);
         return window.WWebJS.getContactModel(contact);
     };
 
