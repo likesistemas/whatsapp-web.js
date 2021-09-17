@@ -72,7 +72,7 @@ class Client extends EventEmitter {
 
         if (this.id && !foldernameRegex.test(this.id)) throw TypeError('Invalid client ID. Make sure you abide by the folder naming rules of your operating system.');
 
-        const dirPath = path.join(process.cwd(), this.options.dataPath, this.id ? 'session-' + this.id : 'session');
+        const dirPath = path.join(this.options.dataPath, this.id ? 'session-' + this.id : 'session');
 
         if (!fs.existsSync(dirPath)) {
             await Util.createNestedDirectory(dirPath);
