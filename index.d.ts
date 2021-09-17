@@ -293,6 +293,9 @@ declare namespace WAWebJS {
         /** Sets bypassing of page's Content-Security-Policy.
          * @default false */
         bypassCSP?: boolean
+        /** Change the default path for saving session files
+         * @default './WWebJS/' */
+        dataPath?: string
     }
 
     export interface CreateGroupResult {
