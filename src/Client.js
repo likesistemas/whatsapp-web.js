@@ -94,8 +94,6 @@ class Client extends EventEmitter {
         this.pupBrowser = browser;
         this.pupPage = page;
 
-        this.emit(Events.PAGE_LOADED, page);
-
         if (this.options.useDeprecatedSessionAuth && this.options.session) {
             await page.evaluateOnNewDocument(
                 session => {
@@ -115,6 +113,8 @@ class Client extends EventEmitter {
             waitUntil: 'load',
             timeout: 0,
         });
+
+        this.emit(Events.PAGE_LOADED, page);
 
         const INTRO_IMG_SELECTOR = '[data-testid="intro-md-beta-logo-dark"], [data-testid="intro-md-beta-logo-light"], [data-asset-intro-image-light="true"], [data-asset-intro-image-dark="true"]';
         const INTRO_QRCODE_SELECTOR = 'div[data-ref] canvas';
