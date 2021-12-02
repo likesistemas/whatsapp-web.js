@@ -29,104 +29,160 @@ describe('Client', function() {
             await client.destroy();
         });
 
-        it('should fail auth if session is invalid', async function() {
-            this.timeout(40000);
-
-            const authFailCallback = sinon.spy();
+        it('should disconnect after reaching max qr retries', async function () {
+            this.timeout(50000);
+            
             const qrCallback = sinon.spy();
-            const readyCallback = sinon.spy();
-
-            const client = helper.createClient({
-                options: {
-                    session: {
-                        WABrowserId: 'invalid', 
-                        WASecretBundle: 'invalid', 
-                        WAToken1: 'invalid', 
-                        WAToken2: 'invalid'
-                    },
-                    authTimeoutMs: 10000,
-                    restartOnAuthFail: false
-                }
-            });
-
+            const disconnectedCallback = sinon.spy();
+            
+            const client = helper.createClient({options: {qrMaxRetries: 2}});
             client.on('qr', qrCallback);
-            client.on('auth_failure', authFailCallback);
-            client.on('ready', readyCallback);
+            client.on('disconnected', disconnectedCallback);
 
             client.initialize();
 
-            await helper.sleep(25000);
-
-            expect(authFailCallback.called).to.equal(true);
-            expect(authFailCallback.args[0][0]).to.equal('Unable to log in. Are the session details valid?');
-
-            expect(readyCallback.called).to.equal(false);
-            expect(qrCallback.called).to.equal(false);
-
-            await client.destroy();
+            await helper.sleep(45000);
+            
+            expect(qrCallback.calledThrice).to.eql(true);
+            expect(disconnectedCallback.calledOnceWith('Max qrcode retries reached')).to.eql(true);
         });
 
-        it('can restart without a session if session was invalid and restartOnAuthFail=true', async function() {
-            this.timeout(40000);
-
-            const authFailCallback = sinon.spy();
-            const qrCallback = sinon.spy();
-
-            const client = helper.createClient({
-                options:{
-                    session: {
-                        WABrowserId: 'invalid', 
-                        WASecretBundle: 'invalid', 
-                        WAToken1: 'invalid', 
-                        WAToken2: 'invalid'
-                    },
-                    authTimeoutMs: 10000,
-                    restartOnAuthFail: true
-                }
+        describe('old sessions', function() {
+            it('should fail auth if session is invalid', async function() {
+                this.timeout(40000);
+    
+                const authFailCallback = sinon.spy();
+                const qrCallback = sinon.spy();
+                const readyCallback = sinon.spy();
+    
+                const client = helper.createClient({
+                    options: {
+                        session: {
+                            WABrowserId: 'invalid', 
+                            WASecretBundle: 'invalid', 
+                            WAToken1: 'invalid', 
+                            WAToken2: 'invalid'
+                        },
+                        authTimeoutMs: 10000,
+                        restartOnAuthFail: false,
+                        useDeprecatedSessionAuth: true
+                    }
+                });
+    
+                client.on('qr', qrCallback);
+                client.on('auth_failure', authFailCallback);
+                client.on('ready', readyCallback);
+    
+                client.initialize();
+    
+                await helper.sleep(25000);
+    
+                expect(authFailCallback.called).to.equal(true);
+                expect(authFailCallback.args[0][0]).to.equal('Unable to log in');
+    
+                expect(readyCallback.called).to.equal(false);
+                expect(qrCallback.called).to.equal(false);
+    
+                await client.destroy();
             });
+    
+            it('can restart without a session if session was invalid and restartOnAuthFail=true', async function() {
+                this.timeout(40000);
+    
+                const authFailCallback = sinon.spy();
+                const qrCallback = sinon.spy();
+    
+                const client = helper.createClient({
+                    options:{
+                        session: {
+                            WABrowserId: 'invalid', 
+                            WASecretBundle: 'invalid',  
+                            WAToken1: 'invalid', 
+                            WAToken2: 'invalid'
+                        },
+                        authTimeoutMs: 10000,
+                        restartOnAuthFail: true,
+                        useDeprecatedSessionAuth: true
+                    }
+                });
+    
+                client.on('auth_failure', authFailCallback);
+                client.on('qr', qrCallback);
+    
+                client.initialize();
+    
+                await helper.sleep(35000);
+    
+                expect(authFailCallback.called).to.equal(true);
+                expect(qrCallback.called).to.equal(true);
+                expect(qrCallback.args[0][0]).to.have.lengthOf(152);
+    
+                await client.destroy();
+            });
+            
+            it('should authenticate with existing session', async function() {
+                this.timeout(40000);
+    
+                const authenticatedCallback = sinon.spy();
+                const qrCallback = sinon.spy();
+                const readyCallback = sinon.spy();
+    
+                const client = helper.createClient({
+                    authenticated: true,
+                    options: { useDeprecatedSessionAuth: true }
+                });
 
-            client.on('auth_failure', authFailCallback);
-            client.on('qr', qrCallback);
-
-            client.initialize();
-
-            await helper.sleep(35000);
-
-            expect(authFailCallback.called).to.equal(true);
-            expect(qrCallback.called).to.equal(true);
-            expect(qrCallback.args[0][0]).to.have.lengthOf(152);
-
-            await client.destroy();
-        });
-        
-        it('should authenticate with existing session', async function() {
-            this.timeout(40000);
-
-            const authenticatedCallback = sinon.spy();
-            const qrCallback = sinon.spy();
-            const readyCallback = sinon.spy();
-
-            const client = helper.createClient({withSession: true});
-            client.on('qr', qrCallback);
-            client.on('authenticated', authenticatedCallback);
-            client.on('ready', readyCallback);
-
-            await client.initialize();
-
-            expect(authenticatedCallback.called).to.equal(true);
-            const newSession = authenticatedCallback.args[0][0];
-            expect(newSession).to.have.key([
-                'WABrowserId', 
-                'WASecretBundle', 
-                'WAToken1', 
-                'WAToken2'
-            ]);
-            expect(authenticatedCallback.called).to.equal(true);
-            expect(readyCallback.called).to.equal(true);
-            expect(qrCallback.called).to.equal(false);
-
-            await client.destroy();
+                client.on('qr', qrCallback);
+                client.on('authenticated', authenticatedCallback);
+                client.on('ready', readyCallback);
+    
+                await client.initialize();
+    
+                expect(authenticatedCallback.called).to.equal(true);
+                const newSession = authenticatedCallback.args[0][0];
+                expect(newSession).to.have.key([
+                    'WABrowserId', 
+                    'WASecretBundle', 
+                    'WAToken1', 
+                    'WAToken2'
+                ]);
+                expect(authenticatedCallback.called).to.equal(true);
+                expect(readyCallback.called).to.equal(true);
+                expect(qrCallback.called).to.equal(false);
+    
+                await client.destroy();
+            }); 
         });   
+
+        describe('dataDir auth', function() {
+            it('should authenticate with existing session', async function() {
+                this.timeout(40000);
+            
+                const authenticatedCallback = sinon.spy();
+                const qrCallback = sinon.spy();
+                const readyCallback = sinon.spy();
+            
+                const client = helper.createClient({
+                    authenticated: true,
+                });
+        
+                client.on('qr', qrCallback);
+                client.on('authenticated', authenticatedCallback);
+                client.on('ready', readyCallback);
+            
+                await client.initialize();
+            
+                expect(authenticatedCallback.called).to.equal(true);
+                expect(authenticatedCallback.args[0][0]).to.equal(undefined);
+                expect(readyCallback.called).to.equal(true);
+                expect(qrCallback.called).to.equal(false);
+            
+                await client.destroy();
+            }); 
+            
+            
+        });
+          
     });
 
     describe('Authenticated', function() {
@@ -134,7 +190,9 @@ describe('Client', function() {
 
         before(async function() {
             this.timeout(35000);
-            client = helper.createClient({withSession: true});
+            client = helper.createClient({
+                authenticated: true, 
+            });
             await client.initialize();
         });
 
@@ -384,6 +442,32 @@ END:VCARD`;
                 expect(contact).to.exist;
                 expect(contact).to.be.instanceOf(Contact);
             });
+
+            it('can block a contact', async function () {
+                const contact = await client.getContactById(remoteId);
+                await contact.block();
+
+                const refreshedContact = await client.getContactById(remoteId);
+                expect(refreshedContact.isBlocked).to.eql(true);
+            });
+
+            it('can get a list of blocked contacts', async function () {
+                const blockedContacts = await client.getBlockedContacts();
+                expect(blockedContacts.length).to.be.greaterThanOrEqual(1);
+
+                const contact = blockedContacts.find(c => c.id._serialized === remoteId);
+                expect(contact).to.exist;
+                expect(contact).to.be.instanceOf(Contact);
+
+            });
+
+            it('can unblock a contact', async function () {
+                const contact = await client.getContactById(remoteId);
+                await contact.unblock();
+
+                const refreshedContact = await client.getContactById(remoteId);
+                expect(refreshedContact.isBlocked).to.eql(false);
+            });
         });
 
         describe('Numbers and Users', function () {
@@ -411,6 +495,24 @@ END:VCARD`;
                 const number = '9999999999';
                 const numberId = await client.getNumberId(number);
                 expect(numberId).to.eql(null);
+            });
+
+            it('can get a number\'s country code', async function () {
+                const number = '18092201111';
+                const countryCode = await client.getCountryCode(number);
+                expect(countryCode).to.eql('1');
+            });
+
+            it('can get a formatted number', async function () {
+                const number = '18092201111';
+                const formatted = await client.getFormattedNumber(number);
+                expect(formatted).to.eql('+1 (809) 220-1111');
+            });
+
+            it('can get a formatted number from a serialized ID', async function () {
+                const number = '18092201111@c.us';
+                const formatted = await client.getFormattedNumber(number);
+                expect(formatted).to.eql('+1 (809) 220-1111');
             });
         });
     });
