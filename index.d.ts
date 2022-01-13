@@ -84,6 +84,9 @@ declare namespace WAWebJS {
         /** Returns the contact ID's profile picture URL, if privacy settings allow it */
         getProfilePicUrl(contactId: string): Promise<string>
 
+        /** Gets the Contact's common groups with you. Returns empty array if you don't have any common group. */
+        getCommonGroups(contactId: string): Promise<ChatId[]>
+
         /** Gets the current connection state for the client */
         getState(): Promise<WAState>
 
@@ -321,6 +324,9 @@ declare namespace WAWebJS {
         /** Change the default path for saving session files
          * @default './WWebJS/' */
         dataPath?: string
+        /** Remove message history thus saving you a lot of storage space.
+         @default false */
+        disableMessageHistory?: boolean
     }
 
     /** 
@@ -608,6 +614,10 @@ declare namespace WAWebJS {
          * If not, it will send the message in the same Chat as the original message was sent. 
          */
         reply: (content: MessageContent, chatId?: string, options?: MessageSendOptions) => Promise<Message>,
+         /**
+          * Returns message in a raw format
+          */
+        raw: () => unknown,
         /** 
          * Forwards this message to another chat
          */
@@ -805,6 +815,9 @@ declare namespace WAWebJS {
 
         /** Gets the Contact's current "about" info. Returns null if you don't have permission to read their status.  */
         getAbout: () => Promise<string | null>,
+        
+        /** Gets the Contact's common groups with you. Returns empty array if you don't have any common group. */
+        getCommonGroups: (contactId: string) => Promise<ChatId[]>
 
     }
 

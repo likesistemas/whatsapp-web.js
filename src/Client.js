@@ -30,6 +30,7 @@ const { ClientInfo, Message, MessageMedia, Contact, Location, GroupNotification 
  * @param {string} options.ffmpegPath - Ffmpeg path to use when formating videos to webp while sending stickers 
  * @param {boolean} options.bypassCSP - Sets bypassing of page's Content-Security-Policy.
  * @param {string} options.clientId - Client id to distinguish instances if you are using multiple, otherwise keep null if you are using only one instance
+ * @param {boolean} options.disableMessageHistory - Remove message history thus saving you a lot of storage space.
  * 
  * @fires Client#qr
  * @fires Client#authenticated
@@ -183,7 +184,7 @@ class Client extends EventEmitter {
 
             // Wait for code scan
             await page.waitForSelector(INTRO_IMG_SELECTOR, { timeout: 0 });
-        }
+        } 
 
         await page.evaluate(ExposeStore, moduleRaid.toString());
 
@@ -213,6 +214,15 @@ class Client extends EventEmitter {
 
         const isMD = await page.evaluate(() => {
             return window.Store.Features.features.MD_BACKEND;
+        });
+
+        await page.evaluate(async () => {
+            // safely unregister service workers
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            for (let registration of registrations) { 
+                registration.unregister();
+            }
+
         });
 
         if(this.options.useDeprecatedSessionAuth && isMD) {
@@ -447,7 +457,7 @@ class Client extends EventEmitter {
         });
 
         if(this.dataDir) {
-            return fs.rmdirSync(this.dataDir, {recursive: true});
+            return (fs.rmSync ? fs.rmSync : fs.rmdirSync).call(this.dataDir, {recursive: true});
         }
     }
 
@@ -541,12 +551,27 @@ class Client extends EventEmitter {
         }
 
         if (internalOptions.sendMediaAsSticker && internalOptions.attachment) {
-            internalOptions.attachment = await Util.formatToWebpSticker(internalOptions.attachment);
+            if (internalOptions.attachment.mimetype.startsWith('image')) {
+                internalOptions.attachment = await this.pupPage.evaluate(async (attachment, metadata) => {
+                    return await window.WWebJS.toStickerData(attachment, metadata);
+                }, internalOptions.attachment, {
+                    name: options.stickerName,
+                    author: options.stickerAuthor,
+                    categories: options.stickerCategories
+                });
+            } else {
+                internalOptions.attachment = await Util.formatToWebpSticker(internalOptions.attachment, {
+                    name: options.stickerName,
+                    author: options.stickerAuthor,
+                    categories: options.stickerCategories
+                });
+            }
         }
 
         const newMessage = await this.pupPage.evaluate(async (chatId, message, options, sendSeen) => {
             const chatWid = window.Store.WidFactory.createWid(chatId);
             const chat = await window.Store.Chat.find(chatWid);
+            
 
             if (sendSeen) {
                 window.WWebJS.sendSeen(chatId);
@@ -653,15 +678,15 @@ class Client extends EventEmitter {
 
     /**
      * Accepts a private invitation to join a group
-     * @param {object} inviteV4 Invite V4 Info
+     * @param {object} inviteInfo Invite V4 Info
      * @returns {Promise<Object>}
      */
     async acceptGroupV4Invite(inviteInfo) {
         if(!inviteInfo.inviteCode) throw 'Invalid invite code, try passing the message.inviteV4 object';
         if (inviteInfo.inviteCodeExp == 0) throw 'Expired invite code';
-        return await this.pupPage.evaluate(async inviteInfo => {
-            let { groupId, fromId, inviteCode, inviteCodeExp, toId } = inviteInfo;
-            return await window.Store.Wap.acceptGroupV4Invite(groupId, fromId, inviteCode, String(inviteCodeExp), toId);
+        return this.pupPage.evaluate(async inviteInfo => {
+            let { groupId, fromId, inviteCode, inviteCodeExp} = inviteInfo;
+            return await window.Store.JoinInviteV4.sendJoinGroupViaInviteV4(inviteCode, String(inviteCodeExp), groupId, fromId);
         }, inviteInfo);
     }
     
@@ -822,6 +847,18 @@ class Client extends EventEmitter {
         }, contactId);
 
         return profilePic ? profilePic.eurl : undefined;
+    }
+
+    /**
+     * Gets the Contact's common groups with you. Returns empty array if you don't have any common group.
+     * @param {string} contactId the whatsapp user's ID (_serialized format)
+     * @returns {Promise<WAWebJS.ChatId[]>}
+     */
+    async getCommonGroups(contactId) {
+        return await this.client.pupPage.evaluate(async (contactId) => {
+            const contact = window.Store.Contact.get(contactId);
+            return await window.Store.findCommonGroups(contact);
+        }, contactId);
     }
 
     /**

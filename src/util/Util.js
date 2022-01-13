@@ -49,39 +49,6 @@ class Util {
     }
 
     /**
-     * Formats a image to webp
-     * @param {MessageMedia} media
-     * 
-     * @returns {Promise<MessageMedia>} media in webp format
-     */
-    static async formatImageToWebpSticker(media) {
-        if (!media.mimetype.includes('image'))
-            throw new Error('media is not a image');
-
-        if (media.mimetype.includes('webp')) {
-            return media;
-        }
-
-        const buff = Buffer.from(media.data, 'base64');
-
-        let sharpImg = sharp(buff);
-        sharpImg = sharpImg.webp();
-
-        sharpImg = sharpImg.resize(512, 512, {
-            fit: 'contain',
-            background: { r: 0, g: 0, b: 0, alpha: 0 },
-        });
-
-        let webpBase64 = (await sharpImg.toBuffer()).toString('base64');
-
-        return {
-            mimetype: 'image/webp',
-            data: webpBase64,
-            filename: media.filename,
-        };
-    }
-
-    /**
      * Formats a video to webp
      * @param {MessageMedia} media
      * 
@@ -151,8 +118,34 @@ class Util {
      * 
      * @returns {Promise<MessageMedia>} media in webp format
      */
-    static async formatToWebpSticker(media) {
-        throw new Error('Invalid media format');
+    static async formatToWebpSticker(media, metadata) {
+        let webpMedia;
+
+        if (media.mimetype.includes('image'))
+            return media;
+        else if (media.mimetype.includes('video'))
+            webpMedia = await this.formatVideoToWebpSticker(media);
+        else
+            throw new Error('Invalid media format');
+
+        if (metadata.name || metadata.author) {
+            const img = new webp.Image();
+            const hash = this.generateHash(32);
+            const stickerPackId = hash;
+            const packname = metadata.name;
+            const author = metadata.author;
+            const categories = metadata.categories || [''];
+            const json = { 'sticker-pack-id': stickerPackId, 'sticker-pack-name': packname, 'sticker-pack-publisher': author, 'emojis': categories };
+            let exifAttr = Buffer.from([0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00]);
+            let jsonBuffer = Buffer.from(JSON.stringify(json), 'utf8');
+            let exif = Buffer.concat([exifAttr, jsonBuffer]);
+            exif.writeUIntLE(jsonBuffer.length, 14, 4);
+            await img.load(Buffer.from(webpMedia.data, 'base64'));
+            img.exif = exif;
+            webpMedia.data = (await img.save(null)).toString('base64');
+        }
+
+        return webpMedia;
     }
 
     /**
