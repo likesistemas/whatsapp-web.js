@@ -95,16 +95,24 @@ class Client extends EventEmitter {
         this.pupBrowser = browser;
         this.pupPage = page;
 
+
         if (this.options.useDeprecatedSessionAuth && this.options.session) {
-            await page.evaluateOnNewDocument(
-                session => {
-                    localStorage.clear();
-                    localStorage.setItem('WABrowserId', session.WABrowserId);
-                    localStorage.setItem('WASecretBundle', session.WASecretBundle);
-                    localStorage.setItem('WAToken1', session.WAToken1);
-                    localStorage.setItem('WAToken2', session.WAToken2);
-                }, this.options.session);
-        } 
+            // remember me
+            await page.evaluateOnNewDocument(() => {
+                localStorage.setItem('remember-me', 'true');
+            });
+
+            if (this.options.session) {
+                await page.evaluateOnNewDocument(
+                    session => {
+                        localStorage.clear();
+                        localStorage.setItem('WABrowserId', session.WABrowserId);
+                        localStorage.setItem('WASecretBundle', session.WASecretBundle);
+                        localStorage.setItem('WAToken1', session.WAToken1);
+                        localStorage.setItem('WAToken2', session.WAToken2);
+                    }, this.options.session);
+            } 
+        }
 
         if(this.options.bypassCSP) {
             await page.setBypassCSP(true);
@@ -187,7 +195,6 @@ class Client extends EventEmitter {
         } 
 
         await page.evaluate(ExposeStore, moduleRaid.toString());
-
         let authEventPayload = undefined;
         if(this.options.useDeprecatedSessionAuth) {
             // Get session tokens
@@ -855,10 +862,22 @@ class Client extends EventEmitter {
      * @returns {Promise<WAWebJS.ChatId[]>}
      */
     async getCommonGroups(contactId) {
-        return await this.client.pupPage.evaluate(async (contactId) => {
+        const commonGroups = await this.client.pupPage.evaluate(async (contactId) => {
             const contact = window.Store.Contact.get(contactId);
-            return await window.Store.findCommonGroups(contact);
+            if(contact.commonGroups){
+                return contact.commonGroups.serialize();
+            }
+            const status = await window.Store.findCommonGroups(contact);
+            if (status){
+                return contact.commonGroups.serialize();
+            }
+            return [];
         }, contactId);
+        const chats = [];
+        for (const group of commonGroups) {
+            chats.push(group.id);
+        }
+        return chats;
     }
 
     /**

@@ -184,6 +184,12 @@ class Message extends Base {
          */
         this.token = data.token ? data.token : undefined;
 
+        /** 
+         * Indicates whether the message is a Gif
+         * @type {boolean}
+         */
+        this.isGif = Boolean(data.isGif);
+
         /** Title */
         if (data.title) {
             this.title = data.title;
@@ -389,7 +395,7 @@ class Message extends Base {
         await this.client.pupPage.evaluate((msgId, everyone) => {
             let msg = window.Store.Msg.get(msgId);
 
-            if (everyone && msg.id.fromMe && msg.canRevoke()) {
+            if (everyone && msg.id.fromMe && msg._canRevoke()) {
                 return window.Store.Cmd.sendRevokeMsgs(msg.chat, [msg], true);
             }
 
