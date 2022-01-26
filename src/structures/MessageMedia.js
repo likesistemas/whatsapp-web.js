@@ -89,7 +89,7 @@ class MessageMedia {
             ? (await options.client.pupPage.evaluate(fetchData, url, options.reqOptions))
             : (await fetchData(url, options.reqOptions));
 
-        const filename = options.filename ??
+        const filename = options.filename ? options.filename :
             (res.name ? res.name[0] : (pUrl.pathname.split('/').pop() || 'file'));
         
         if (!mimetype)
