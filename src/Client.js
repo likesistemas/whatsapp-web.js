@@ -110,6 +110,9 @@ class Client extends EventEmitter {
             referer: 'https://whatsapp.com/'
         });
 
+        await page.waitForSelector('[class=web]');
+        this.emit(Events.PAGE_LOADED, page);
+
         const INTRO_IMG_SELECTOR = '[data-testid="intro-md-beta-logo-dark"], [data-testid="intro-md-beta-logo-light"], [data-asset-intro-image-light="true"], [data-asset-intro-image-dark="true"]';
         const INTRO_QRCODE_SELECTOR = 'div[data-ref] canvas';
 
