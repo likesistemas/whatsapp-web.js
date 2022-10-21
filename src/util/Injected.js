@@ -228,9 +228,9 @@ exports.LoadUtils = () => {
         delete options.extraOptions;
 
         const ephemeralSettings = {
-            ephemeralDuration: chat?.hasOwnProperty('isEphemeralSettingOn') && chat?.isEphemeralSettingOn() ? chat?.getEphemeralSetting() : undefined,
-            ephemeralSettingTimestamp: chat?.hasOwnProperty('getEphemeralSettingTimestamp') ? chat?.getEphemeralSettingTimestamp() : undefined,
-            disappearingModeInitiator: chat?.hasOwnProperty('getDisappearingModeInitiator') ? chat?.getDisappearingModeInitiator() : undefined,
+            ephemeralDuration: chat !== undefined && chat.hasOwnProperty('isEphemeralSettingOn') && chat.isEphemeralSettingOn() ? chat.getEphemeralSetting() : undefined,
+            ephemeralSettingTimestamp: chat !== undefined && chat.hasOwnProperty('getEphemeralSettingTimestamp') ? chat.getEphemeralSettingTimestamp() : undefined,
+            disappearingModeInitiator: chat !== undefined && chat.hasOwnProperty('getDisappearingModeInitiator') ? chat.getDisappearingModeInitiator() : undefined,
         };
 
         const message = {
@@ -366,7 +366,7 @@ exports.LoadUtils = () => {
 
         msg.isEphemeral = message.isEphemeral;
         msg.isStatusV3 = message.isStatusV3;
-        msg.links = (message?.hasOwnProperty('getRawLinks') ? message?.getRawLinks() || [] : [])?.map(link => ({
+        msg.links = (message !== undefined && message.hasOwnProperty('getRawLinks') ? message.getRawLinks() || [] : []).map(link => ({
             link: link.href,
             isSuspicious: Boolean(link.suspiciousCharacters && link.suspiciousCharacters.size)
         })) || [];
