@@ -174,7 +174,7 @@ class Client extends EventEmitter {
             }
         );
 
-        const INTRO_IMG_SELECTOR = '[data-testid="intro-md-beta-logo-dark"], [data-testid="intro-md-beta-logo-light"], [data-asset-intro-image-light="true"], [data-asset-intro-image-dark="true"]';
+        const INTRO_IMG_SELECTOR = '[data-icon=\'chat\']';
         const INTRO_QRCODE_SELECTOR = 'div[data-ref] canvas';
 
         // Checks which selector appears first
@@ -787,7 +787,7 @@ class Client extends EventEmitter {
      * Message options.
      * @typedef {Object} MessageSendOptions
      * @property {boolean} [linkPreview=true] - Show links preview. Has no effect on multi-device accounts.
-     * @property {boolean} [sendAudioAsVoice=false] - Send audio as voice message
+     * @property {boolean} [sendAudioAsVoice=false] - Send audio as voice message with a generated waveform
      * @property {boolean} [sendVideoAsGif=false] - Send video as gif
      * @property {boolean} [sendMediaAsSticker=false] - Send media as a sticker
      * @property {boolean} [sendMediaAsDocument=false] - Send media as a document
