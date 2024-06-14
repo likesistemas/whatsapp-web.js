@@ -15,7 +15,8 @@ const { LoadUtils } = require('./util/Injected/Utils');
 const ChatFactory = require('./factories/ChatFactory');
 const ContactFactory = require('./factories/ContactFactory');
 const WebCacheFactory = require('./webCache/WebCacheFactory');
-const { ClientInfo, Message, MessageMedia, Contact, Location, Poll, GroupNotification, Label, Call, Buttons, List, Reaction } = require('./structures');
+const { ClientInfo, Message, MessageMedia, Contact, Location, Poll, PollVote, GroupNotification, Label, Call, Buttons, List, Reaction } = require('./structures');
+const LegacySessionAuth = require('./authStrategies/LegacySessionAuth');
 const NoAuth = require('./authStrategies/NoAuth');
 
 /**
@@ -57,6 +58,7 @@ const NoAuth = require('./authStrategies/NoAuth');
  * @fires Client#contact_changed
  * @fires Client#group_admin_changed
  * @fires Client#group_membership_request
+ * @fires Client#vote_update
  */
 class Client extends EventEmitter {
     constructor(options = {}) {
@@ -685,7 +687,410 @@ class Client extends EventEmitter {
             });
         }
 
-        await this.pupPage.evaluate(() => {
+        await this.page.evaluate(() => {
+            /**
+             * Helper function that compares between two WWeb versions. Its purpose is to help the developer to choose the correct code implementation depending on the comparison value and the WWeb version.
+             * @param {string} lOperand The left operand for the WWeb version string to compare with
+             * @param {string} operator The comparison operator
+             * @param {string} rOperand The right operand for the WWeb version string to compare with
+             * @returns {boolean} Boolean value that indicates the result of the comparison
+             */
+            window.compareWwebVersions = (lOperand, operator, rOperand) => {
+                if (!['>', '>=', '<', '<=', '='].includes(operator)) {
+                    throw new class _ extends Error {
+                        constructor(m) { super(m); this.name = 'CompareWwebVersionsError'; }
+                    }('Invalid comparison operator is provided');
+
+                }
+                if (typeof lOperand !== 'string' || typeof rOperand !== 'string') {
+                    throw new class _ extends Error {
+                        constructor(m) { super(m); this.name = 'CompareWwebVersionsError'; }
+                    }('A non-string WWeb version type is provided');
+                }
+
+                lOperand = lOperand.replace(/-beta$/, '');
+                rOperand = rOperand.replace(/-beta$/, '');
+
+                while (lOperand.length !== rOperand.length) {
+                    lOperand.length > rOperand.length
+                        ? rOperand = rOperand.concat('0')
+                        : lOperand = lOperand.concat('0');
+                }
+
+                lOperand = Number(lOperand.replace(/\./g, ''));
+                rOperand = Number(rOperand.replace(/\./g, ''));
+
+                return (
+                    operator === '>' ? lOperand > rOperand :
+                        operator === '>=' ? lOperand >= rOperand :
+                            operator === '<' ? lOperand < rOperand :
+                                operator === '<=' ? lOperand <= rOperand :
+                                    operator === '=' ? lOperand === rOperand :
+                                        false
+                );
+            };
+        });
+
+        await this.page.evaluate(ExposeStore, moduleRaid.toString());
+        const authEventPayload = await this.authStrategy.getAuthEventPayload();
+
+        /**
+         * Emitted when authentication is successful
+         * @event Client#authenticated
+         */
+        this.emit(Events.AUTHENTICATED, authEventPayload);
+
+        // Check window.Store Injection
+        await this.page.waitForFunction('window.Store != undefined');
+
+        await this.page.evaluate(async () => {
+            // safely unregister service workers
+            const registrations = await navigator.serviceWorker.getRegistrations();
+            for (let registration of registrations) {
+                registration.unregister();
+            }
+        });
+
+        //Load util functions (serializers, helper functions)
+        await this.page.evaluate(LoadUtils);
+
+        // Expose client info
+        /**
+         * Current connection information
+         * @type {ClientInfo}
+         */
+        this.info = new ClientInfo(this, await this.page.evaluate(() => {
+            return { ...window.Store.Conn.serialize(), wid: window.Store.User.getMeUser() };
+        }));
+
+        // Add InterfaceController
+        this.interface = new InterfaceController(this);
+
+        // Register events
+        await this.page.exposeFunction('onAddMessageEvent', msg => {
+            if (msg.type === 'gp2') {
+                const notification = new GroupNotification(this, msg);
+                if (['add', 'invite', 'linked_group_join'].includes(msg.subtype)) {
+                    /**
+                     * Emitted when a user joins the chat via invite link or is added by an admin.
+                     * @event Client#group_join
+                     * @param {GroupNotification} notification GroupNotification with more information about the action
+                     */
+                    this.emit(Events.GROUP_JOIN, notification);
+                } else if (msg.subtype === 'remove' || msg.subtype === 'leave') {
+                    /**
+                     * Emitted when a user leaves the chat or is removed by an admin.
+                     * @event Client#group_leave
+                     * @param {GroupNotification} notification GroupNotification with more information about the action
+                     */
+                    this.emit(Events.GROUP_LEAVE, notification);
+                } else if (msg.subtype === 'promote' || msg.subtype === 'demote') {
+                    /**
+                     * Emitted when a current user is promoted to an admin or demoted to a regular user.
+                     * @event Client#group_admin_changed
+                     * @param {GroupNotification} notification GroupNotification with more information about the action
+                     */
+                    this.emit(Events.GROUP_ADMIN_CHANGED, notification);
+                } else if (msg.subtype === 'membership_approval_request') {
+                    /**
+                     * Emitted when some user requested to join the group
+                     * that has the membership approval mode turned on
+                     * @event Client#group_membership_request
+                     * @param {GroupNotification} notification GroupNotification with more information about the action
+                     * @param {string} notification.chatId The group ID the request was made for
+                     * @param {string} notification.author The user ID that made a request
+                     * @param {number} notification.timestamp The timestamp the request was made at
+                     */
+                    this.emit(Events.GROUP_MEMBERSHIP_REQUEST, notification);
+                } else {
+                    /**
+                     * Emitted when group settings are updated, such as subject, description or picture.
+                     * @event Client#group_update
+                     * @param {GroupNotification} notification GroupNotification with more information about the action
+                     */
+                    this.emit(Events.GROUP_UPDATE, notification);
+                }
+                return;
+            }
+
+            const message = new Message(this, msg);
+
+            /**
+             * Emitted when a new message is created, which may include the current user's own messages.
+             * @event Client#message_create
+             * @param {Message} message The message that was created
+             */
+            this.emit(Events.MESSAGE_CREATE, message);
+
+            if (msg.id.fromMe) return;
+
+            /**
+             * Emitted when a new message is received.
+             * @event Client#message
+             * @param {Message} message The message that was received
+             */
+            this.emit(Events.MESSAGE_RECEIVED, message);
+        });
+
+        let last_message;
+
+        await this.page.exposeFunction('onChangeMessageTypeEvent', (msg) => {
+
+            if (msg.type === 'revoked') {
+                const message = new Message(this, msg);
+                let revoked_msg;
+                if (last_message && msg.id.id === last_message.id.id) {
+                    revoked_msg = new Message(this, last_message);
+                }
+
+                /**
+                 * Emitted when a message is deleted for everyone in the chat.
+                 * @event Client#message_revoke_everyone
+                 * @param {Message} message The message that was revoked, in its current state. It will not contain the original message's data.
+                 * @param {?Message} revoked_msg The message that was revoked, before it was revoked. It will contain the message's original data. 
+                 * Note that due to the way this data is captured, it may be possible that this param will be undefined.
+                 */
+                this.emit(Events.MESSAGE_REVOKED_EVERYONE, message, revoked_msg);
+            }
+
+        });
+
+        await this.page.exposeFunction('onChangeMessageEvent', (msg) => {
+
+            if (msg.type !== 'revoked') {
+                last_message = msg;
+            }
+
+            /**
+             * The event notification that is received when one of
+             * the group participants changes their phone number.
+             */
+            const isParticipant = msg.type === 'gp2' && msg.subtype === 'modify';
+
+            /**
+             * The event notification that is received when one of
+             * the contacts changes their phone number.
+             */
+            const isContact = msg.type === 'notification_template' && msg.subtype === 'change_number';
+
+            if (isParticipant || isContact) {
+                /** @type {GroupNotification} object does not provide enough information about this event, so a @type {Message} object is used. */
+                const message = new Message(this, msg);
+
+                const newId = isParticipant ? msg.recipients[0] : msg.to;
+                const oldId = isParticipant ? msg.author : msg.templateParams.find(id => id !== newId);
+
+                /**
+                 * Emitted when a contact or a group participant changes their phone number.
+                 * @event Client#contact_changed
+                 * @param {Message} message Message with more information about the event.
+                 * @param {String} oldId The user's id (an old one) who changed their phone number
+                 * and who triggered the notification.
+                 * @param {String} newId The user's new id after the change.
+                 * @param {Boolean} isContact Indicates if a contact or a group participant changed their phone number.
+                 */
+                this.emit(Events.CONTACT_CHANGED, message, oldId, newId, isContact);
+            }
+        });
+
+        await this.page.exposeFunction('onRemoveMessageEvent', (msg) => {
+
+            if (!msg.isNewMsg) return;
+
+            const message = new Message(this, msg);
+
+            /**
+             * Emitted when a message is deleted by the current user.
+             * @event Client#message_revoke_me
+             * @param {Message} message The message that was revoked
+             */
+            this.emit(Events.MESSAGE_REVOKED_ME, message);
+
+        });
+
+        await this.page.exposeFunction('onMessageAckEvent', (msg, ack) => {
+
+            const message = new Message(this, msg);
+
+            /**
+             * Emitted when an ack event occurrs on message type.
+             * @event Client#message_ack
+             * @param {Message} message The message that was affected
+             * @param {MessageAck} ack The new ACK value
+             */
+            this.emit(Events.MESSAGE_ACK, message, ack);
+
+        });
+
+        await this.page.exposeFunction('onChatUnreadCountEvent', async (data) =>{
+            const chat = await this.getChatById(data.id);
+            
+            /**
+             * Emitted when the chat unread count changes
+             */
+            this.emit(Events.UNREAD_COUNT, chat);
+        });
+
+        await this.page.exposeFunction('onMessageMediaUploadedEvent', (msg) => {
+
+            const message = new Message(this, msg);
+
+            /**
+             * Emitted when media has been uploaded for a message sent by the client.
+             * @event Client#media_uploaded
+             * @param {Message} message The message with media that was uploaded
+             */
+            this.emit(Events.MEDIA_UPLOADED, message);
+        });
+
+        await this.page.exposeFunction('onAppStateChangedEvent', async (state) => {
+
+            /**
+             * Emitted when the connection state changes
+             * @event Client#change_state
+             * @param {WAState} state the new connection state
+             */
+            this.emit(Events.STATE_CHANGED, state);
+
+            const ACCEPTED_STATES = [WAState.CONNECTED, WAState.OPENING, WAState.PAIRING, WAState.TIMEOUT];
+
+            if (this.options.takeoverOnConflict) {
+                ACCEPTED_STATES.push(WAState.CONFLICT);
+
+                if (state === WAState.CONFLICT) {
+                    setTimeout(() => {
+                        this.pupPage.evaluate(() => window.Store.AppState.takeover());
+                    }, this.options.takeoverTimeoutMs);
+                }
+            }
+
+            if (!ACCEPTED_STATES.includes(state)) {
+                /**
+                 * Emitted when the client has been disconnected
+                 * @event Client#disconnected
+                 * @param {WAState|"NAVIGATION"} reason reason that caused the disconnect
+                 */
+                await this.authStrategy.disconnect();
+                this.emit(Events.DISCONNECTED, state);
+                this.destroy();
+            }
+        });
+
+        await this.page.exposeFunction('onBatteryStateChangedEvent', (state) => {
+            const { battery, plugged } = state;
+
+            if (battery === undefined) return;
+
+            /**
+             * Emitted when the battery percentage for the attached device changes. Will not be sent if using multi-device.
+             * @event Client#change_battery
+             * @param {object} batteryInfo
+             * @param {number} batteryInfo.battery - The current battery percentage
+             * @param {boolean} batteryInfo.plugged - Indicates if the phone is plugged in (true) or not (false)
+             * @deprecated
+             */
+            this.emit(Events.BATTERY_CHANGED, { battery, plugged });
+        });
+
+        await this.page.exposeFunction('onIncomingCall', (call) => {
+            /**
+             * Emitted when a call is received
+             * @event Client#incoming_call
+             * @param {object} call
+             * @param {number} call.id - Call id
+             * @param {string} call.peerJid - Who called
+             * @param {boolean} call.isVideo - if is video
+             * @param {boolean} call.isGroup - if is group
+             * @param {boolean} call.canHandleLocally - if we can handle in waweb
+             * @param {boolean} call.outgoing - if is outgoing
+             * @param {boolean} call.webClientShouldHandle - If Waweb should handle
+             * @param {object} call.participants - Participants
+             */
+            const cll = new Call(this, call);
+            this.emit(Events.INCOMING_CALL, cll);
+        });
+
+        await this.page.exposeFunction('onReaction', (reactions) => {
+            for (const reaction of reactions) {
+                /**
+                 * Emitted when a reaction is sent, received, updated or removed
+                 * @event Client#message_reaction
+                 * @param {object} reaction
+                 * @param {object} reaction.id - Reaction id
+                 * @param {number} reaction.orphan - Orphan
+                 * @param {?string} reaction.orphanReason - Orphan reason
+                 * @param {number} reaction.timestamp - Timestamp
+                 * @param {string} reaction.reaction - Reaction
+                 * @param {boolean} reaction.read - Read
+                 * @param {object} reaction.msgId - Parent message id
+                 * @param {string} reaction.senderId - Sender id
+                 * @param {?number} reaction.ack - Ack
+                 */
+
+                this.emit(Events.MESSAGE_REACTION, new Reaction(this, reaction));
+            }
+        });
+
+        await this.page.exposeFunction('onRemoveChatEvent', async (chat) => {
+            const _chat = await this.getChatById(chat.id);
+
+            /**
+             * Emitted when a chat is removed
+             * @event Client#chat_removed
+             * @param {Chat} chat
+             */
+            this.emit(Events.CHAT_REMOVED, _chat);
+        });
+        
+        await this.page.exposeFunction('onArchiveChatEvent', async (chat, currState, prevState) => {
+            const _chat = await this.getChatById(chat.id);
+            
+            /**
+             * Emitted when a chat is archived/unarchived
+             * @event Client#chat_archived
+             * @param {Chat} chat
+             * @param {boolean} currState
+             * @param {boolean} prevState
+             */
+            this.emit(Events.CHAT_ARCHIVED, _chat, currState, prevState);
+        });
+
+        await this.page.exposeFunction('onEditMessageEvent', (msg, newBody, prevBody) => {
+            
+            if(msg.type === 'revoked'){
+                return;
+            }
+            /**
+             * Emitted when messages are edited
+             * @event Client#message_edit
+             * @param {Message} message
+             * @param {string} newBody
+             * @param {string} prevBody
+             */
+            this.emit(Events.MESSAGE_EDIT, new Message(this, msg), newBody, prevBody);
+        });
+        
+        await this.page.exposeFunction('onAddMessageCiphertextEvent', msg => {
+            
+            /**
+             * Emitted when messages are edited
+             * @event Client#message_ciphertext
+             * @param {Message} message
+             */
+            this.emit(Events.MESSAGE_CIPHERTEXT, new Message(this, msg));
+        });
+
+        await this.page.exposeFunction('onPollVoteEvent', (vote) => {
+            const _vote = new PollVote(this, vote);
+            /**
+             * Emitted when some poll option is selected or deselected,
+             * shows a user's current selected option(s) on the poll
+             * @event Client#vote_update
+             */
+            this.emit(Events.VOTE_UPDATE, _vote);
+        });
+
+        await this.page.evaluate(() => {
             window.Store.Msg.on('change', (msg) => { window.onChangeMessageEvent(window.WWebJS.getMessageModel(msg)); });
             window.Store.Msg.on('change:type', (msg) => { window.onChangeMessageTypeEvent(window.WWebJS.getMessageModel(msg)); });
             window.Store.Msg.on('change:ack', (msg, ack) => { window.onMessageAckEvent(window.WWebJS.getMessageModel(msg), ack); });
@@ -709,6 +1114,10 @@ class Client extends EventEmitter {
                 }
             });
             window.Store.Chat.on('change:unreadCount', (chat) => {window.onChatUnreadCountEvent(chat);});
+            window.Store.PollVote.on('add', (vote) => {
+                const pollVoteModel = window.WWebJS.getPollVoteModel(vote);
+                pollVoteModel && window.onPollVoteEvent(pollVoteModel);
+            });
 
             if (window.compareWwebVersions(window.Debug.VERSION, '>=', '2.3000.1014111620')) {
                 const module = window.Store.AddonReactionTable;
